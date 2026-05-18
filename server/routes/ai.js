@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const Groq = require('groq-sdk');
+const Anthropic = require('@anthropic-ai/sdk');
 const auth = require('../middleware/auth');
 const db = require('../config/db');
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 router.post('/explain/:claimId', auth, async (req, res) => {
   try {
@@ -13,24 +13,25 @@ router.post('/explain/:claimId', auth, async (req, res) => {
     
     const claim = result.rows[0];
     
-    const prompt = `You are a pharmacy claims analyst. Analyze this insurance claim and explain in 2-3 clear sentences why it was flagged as anomalous, and what a pharmacist should check:
-    
-    Patient: ${claim.patient_name}
-    Medication: ${claim.medication}
-    Insurance Provider: ${claim.insurance_provider}
-    Amount: $${claim.amount}
-    Anomaly Reason: ${claim.anomaly_reason}
-    
-    Be specific, professional, and helpful. Keep it under 3 sentences.`;
+    const message = await anthropic.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 256,
+      messages: [{
+        role: 'user',
+        content: `You are a pharmacy claims analyst. Analyze this insurance claim and explain in 2-3 clear sentences why it was flagged as anomalous and what a pharmacist should check:
 
-    const completion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: 'llama-3.3-70b-versatile',
+Patient: ${claim.patient_name}
+Medication: ${claim.medication}
+Insurance Provider: ${claim.insurance_provider}
+Amount: $${claim.amount}
+Anomaly Reason: ${claim.anomaly_reason}
+
+Be specific, professional, and helpful. Keep it under 3 sentences.`
+      }]
     });
 
-    const explanation = completion.choices[0]?.message?.content;
+    const explanation = message.content[0].text;
     
-    // Save explanation to claim
     await db.query('UPDATE claims SET anomaly_reason = $1 WHERE id = $2', 
       [explanation, claim.id]);
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer} from 'recharts';
 
 const API = process.env.REACT_APP_API_URL;
 
@@ -9,17 +9,18 @@ function Dashboard({ token, onLogout }) {
   const [stats, setStats] = useState({ total: 0, pending: 0, flagged: 0, approved: 0 });
   const [claims, setClaims] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ patient_name: '', insurance_provider: '', medication: '', amount: '' });
+  const [form, setForm] = useState({ patient_name: '', insurance_provider: '', medication: '', amount: '', rxcui: '' });
   const [error, setError] = useState('');
   const [aiExplanation, setAiExplanation] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
-  const [selectedClaim, setSelectedClaim] = useState(null);
   const [activePage, setActivePage] = useState('dashboard');
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [auditLog, setAuditLog] = useState([]);
   const [chartData, setChartData] = useState([]);
   const [trendData, setTrendData] = useState([]);
+  const [medicationResults, setMedicationResults] = useState([]);
+  const [medicationLoading, setMedicationLoading] = useState(false);
 
   const filteredClaims = claims.filter(c => {
     const matchSearch = c.patient_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -43,10 +44,10 @@ function Dashboard({ token, onLogout }) {
 
       // Build pie chart data from stats
       setChartData([
-        { name: 'Approved', value: statsRes.data.approved, color: '#10b981' },
-        { name: 'Pending', value: statsRes.data.pending, color: '#f59e0b' },
-        { name: 'Flagged', value: statsRes.data.flagged, color: '#ef4444' },
-        { name: 'Rejected', value: statsRes.data.total - statsRes.data.approved - statsRes.data.pending - statsRes.data.flagged, color: '#6b7280' }
+        { name: 'Approved', value: statsRes.data.approved,       color: '#10b981' },
+        { name: 'Pending',  value: statsRes.data.pending,        color: '#f59e0b' },
+        { name: 'Flagged',  value: statsRes.data.flagged_status, color: '#8b5cf6' },
+        { name: 'Rejected', value: statsRes.data.rejected,       color: '#ef4444' },
       ]);
 
       // Build trend data from claims
@@ -67,14 +68,38 @@ function Dashboard({ token, onLogout }) {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const query = form.medication.trim();
+    if (query.length < 2) {
+      setMedicationResults([]);
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setMedicationLoading(true);
+      try {
+        const res = await axios.get(`${API}/api/medications/search`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { query },
+        });
+        setMedicationResults(res.data.results || []);
+      } catch (err) {
+        setMedicationResults([]);
+      }
+      setMedicationLoading(false);
+    }, 250);
+
+    return () => clearTimeout(timeoutId);
+  }, [form.medication, token]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     try {
       await axios.post(`${API}/api/claims`, form, { headers });
-      setForm({ patient_name: '', insurance_provider: '', medication: '', amount: '' });
+      setForm({ patient_name: '', insurance_provider: '', medication: '', amount: '', rxcui: '' });
       setShowForm(false);
       fetchData();
     } catch (err) {
@@ -92,7 +117,6 @@ function Dashboard({ token, onLogout }) {
   };
 
   const getAiExplanation = async (claim) => {
-    setSelectedClaim(claim.id);
     setAiLoading(true);
     setAiExplanation('');
     try {
@@ -108,6 +132,32 @@ function Dashboard({ token, onLogout }) {
     const colors = { pending: '#f59e0b', approved: '#10b981', rejected: '#ef4444', flagged: '#8b5cf6' };
     return colors[status] || '#666';
   };
+
+  const renderMedicationSearch = () => (
+    <div style={styles.medicationField}>
+      <input placeholder="Medication" value={form.medication}
+        onChange={e => setForm({...form, medication: e.target.value, rxcui: ''})} required />
+      {(medicationLoading || medicationResults.length > 0) && (
+        <div style={styles.medicationResults}>
+          {medicationLoading && <div style={styles.medicationHint}>Searching RxNorm...</div>}
+          {!medicationLoading && medicationResults.slice(0, 6).map(medication => (
+            <button
+              key={medication.rxcui || medication.name}
+              type="button"
+              style={styles.medicationOption}
+              onClick={() => {
+                setForm({...form, medication: medication.name, rxcui: medication.rxcui || ''});
+                setMedicationResults([]);
+              }}
+            >
+              <span style={styles.medicationName}>{medication.name}</span>
+              {medication.rxcui && <span style={styles.medicationCode}>RxCUI {medication.rxcui}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div style={styles.container}>
@@ -195,8 +245,7 @@ function Dashboard({ token, onLogout }) {
                     onChange={e => setForm({...form, patient_name: e.target.value})} required />
                   <input placeholder="Insurance Provider" value={form.insurance_provider}
                     onChange={e => setForm({...form, insurance_provider: e.target.value})} required />
-                  <input placeholder="Medication" value={form.medication}
-                    onChange={e => setForm({...form, medication: e.target.value})} required />
+                  {renderMedicationSearch()}
                   <input type="number" placeholder="Amount ($)" value={form.amount}
                     onChange={e => setForm({...form, amount: e.target.value})} required />
                   <div style={styles.formBtns}>
@@ -210,11 +259,11 @@ function Dashboard({ token, onLogout }) {
             <div style={styles.tableCard}>
               <h3 style={styles.tableTitle}>Recent Claims</h3>
               <ClaimsTable claims={claims.slice(0,5)} onStatus={updateStatus} onExplain={getAiExplanation} statusColor={statusColor} styles={styles} />
-              {aiExplanation && (
+              {(aiLoading || aiExplanation) && (
                 <div style={styles.aiPanel}>
                   <h4 style={styles.aiTitle}>🤖 AI Anomaly Explanation</h4>
-                  <p style={styles.aiText}>{aiExplanation}</p>
-                  <button onClick={() => setAiExplanation('')} style={styles.aiClose}>Dismiss</button>
+                  <p style={styles.aiText}>{aiLoading ? 'Generating Claude explanation...' : aiExplanation}</p>
+                  {!aiLoading && <button onClick={() => setAiExplanation('')} style={styles.aiClose}>Dismiss</button>}
                 </div>
               )}
             </div>
@@ -232,8 +281,7 @@ function Dashboard({ token, onLogout }) {
                     onChange={e => setForm({...form, patient_name: e.target.value})} required />
                   <input placeholder="Insurance Provider" value={form.insurance_provider}
                     onChange={e => setForm({...form, insurance_provider: e.target.value})} required />
-                  <input placeholder="Medication" value={form.medication}
-                    onChange={e => setForm({...form, medication: e.target.value})} required />
+                  {renderMedicationSearch()}
                   <input type="number" placeholder="Amount ($)" value={form.amount}
                     onChange={e => setForm({...form, amount: e.target.value})} required />
                   <div style={styles.formBtns}>
@@ -256,11 +304,11 @@ function Dashboard({ token, onLogout }) {
                 </select>
               </div>
               <ClaimsTable claims={filteredClaims} onStatus={updateStatus} onExplain={getAiExplanation} statusColor={statusColor} styles={styles} />
-              {aiExplanation && (
+              {(aiLoading || aiExplanation) && (
                 <div style={styles.aiPanel}>
                   <h4 style={styles.aiTitle}>🤖 AI Anomaly Explanation</h4>
-                  <p style={styles.aiText}>{aiExplanation}</p>
-                  <button onClick={() => setAiExplanation('')} style={styles.aiClose}>Dismiss</button>
+                  <p style={styles.aiText}>{aiLoading ? 'Generating Claude explanation...' : aiExplanation}</p>
+                  {!aiLoading && <button onClick={() => setAiExplanation('')} style={styles.aiClose}>Dismiss</button>}
                 </div>
               )}
             </div>
@@ -399,7 +447,20 @@ const styles = {
   filterSelect: { width: '180px', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '14px' },
   chartsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' },
   chartCard: { background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-  chartTitle: { fontSize: '16px', fontWeight: '700', marginBottom: '16px', color: '#1a1a2e' }
+  chartTitle: { fontSize: '16px', fontWeight: '700', marginBottom: '16px', color: '#1a1a2e' },
+  medicationField: { position: 'relative' },
+  medicationResults: {
+    position: 'absolute', top: '46px', left: 0, right: 0, background: 'white', border: '1px solid #e2e8f0',
+    borderRadius: '10px', boxShadow: '0 12px 30px rgba(15,23,42,0.16)', zIndex: 20, overflow: 'hidden'
+  },
+  medicationHint: { padding: '12px 14px', color: '#64748b', fontSize: '13px' },
+  medicationOption: {
+    width: '100%', display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center',
+    padding: '10px 12px', background: 'white', color: '#0f172a', borderRadius: 0, borderBottom: '1px solid #f1f5f9',
+    textAlign: 'left', cursor: 'pointer'
+  },
+  medicationName: { fontSize: '13px', fontWeight: '600' },
+  medicationCode: { fontSize: '11px', color: '#64748b', whiteSpace: 'nowrap' }
 };
 
 export default Dashboard;

@@ -25,6 +25,9 @@ app.use('/api/ai', aiRoutes);
 const auditRoutes = require('./routes/audit');
 app.use('/api/audit', auditRoutes);
 
+const medicationRoutes = require('./routes/medications');
+app.use('/api/medications', medicationRoutes);
+
 app.use('/api/auth', authRoutes);
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
