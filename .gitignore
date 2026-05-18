@@ -1,0 +1,19 @@
+# Ignore environment files
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# macOS
+.DS_Store
+
+# Docker
+*.log
+
+# Node
+node_modules/
+client/node_modules/
+server/node_modules/
